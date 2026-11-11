@@ -45,6 +45,9 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
 
 class MainActivity : AppCompatActivity() {
 
@@ -61,6 +64,21 @@ class MainActivity : AppCompatActivity() {
     private var authDialog: AlertDialog? = null
     private var settingsDialog: AlertDialog? = null
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
+    private val lockHandler = Handler(Looper.getMainLooper())
+    
+    private val inactivityTimeout = 60_000L // 1 minute
+    private var lastInteractionTime = 0L
+    private var backgroundTime = 0L
+    private var isAuthenticated = false
+    private var isAuthenticating = false
+    private var pageInitialized = false
+    private var pendingSavedState: Bundle? = null
+    
+    private val inactivityRunnable = Runnable {
+        if (prefs.getBoolean(KEY_LOCK, false) && isAuthenticated) {
+            lockApplication()
+        }
+    }
 
     private val fileChooser = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -113,12 +131,18 @@ class MainActivity : AppCompatActivity() {
             }
         })
 
+        pendingSavedState = savedInstanceState
+        
         if (prefs.getBoolean(KEY_LOCK, false)) {
+            isAuthenticated = false
+            webView.visibility = View.INVISIBLE
             refresh.visibility = View.INVISIBLE
             btnSettings.visibility = View.INVISIBLE
-            authenticateUser(savedInstanceState)
         } else {
+            isAuthenticated = true
+            lastInteractionTime = SystemClock.elapsedRealtime()
             startNormalFlow(savedInstanceState)
+            pageInitialized = true
         }
     }
 
@@ -144,14 +168,85 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        if (!webViewDestroyed) webView.onResume()
+    
+        if (webViewDestroyed) return
+    
+        webView.onResume()
+    
+        if (!prefs.getBoolean(KEY_LOCK, false)) return
+        if (backgroundTime > 0L &&
+            SystemClock.elapsedRealtime() - backgroundTime >= inactivityTimeout
+        ) {
+            backgroundTime = 0L
+            lockApplication()
+            return
+        }
+        
+        backgroundTime = 0L
+        if (!isAuthenticated) {
+            authenticateUser(pendingSavedState)
+            return
+        }
+    
+        val elapsed = SystemClock.elapsedRealtime() - lastInteractionTime
+    
+        if (elapsed >= inactivityTimeout) {
+            lockApplication()
+        } else {
+            scheduleInactivityLock()
+        }
     }
-
+    
     override fun onPause() {
-        if (!webViewDestroyed) webView.onPause()
+        backgroundTime = SystemClock.elapsedRealtime()
+    
+        if (!webViewDestroyed) {
+            webView.onPause()
+        }
+    
         super.onPause()
     }
 
+    override fun onUserInteraction() {
+        super.onUserInteraction()
+    
+        if (isAuthenticated &&
+            prefs.getBoolean(KEY_LOCK, false)
+        ) {
+            lastInteractionTime = SystemClock.elapsedRealtime()
+            scheduleInactivityLock()
+        }
+    }
+    
+    private fun lockApplication() {
+        if (!prefs.getBoolean(KEY_LOCK, false)) return
+        if (!isAuthenticated) return
+
+        backgroundTime = 0L
+        lockHandler.removeCallbacks(inactivityRunnable)
+    
+        isAuthenticated = false
+    
+        webView.visibility = View.INVISIBLE
+        refresh.visibility = View.INVISIBLE
+        btnSettings.visibility = View.INVISIBLE
+    
+        authenticateUser(null)
+    }
+    
+    private fun scheduleInactivityLock() {
+        lockHandler.removeCallbacks(inactivityRunnable)
+    
+        if (!isAuthenticated ||
+            !prefs.getBoolean(KEY_LOCK, false)
+        ) return
+    
+        val elapsed = SystemClock.elapsedRealtime() - lastInteractionTime
+        val remaining = (inactivityTimeout - elapsed).coerceAtLeast(0L)
+    
+        lockHandler.postDelayed(inactivityRunnable, remaining)
+    }    
+    
     override fun onDestroy() {
         errorDialog?.dismiss()
         serverDialog?.dismiss()
@@ -160,6 +255,7 @@ class MainActivity : AppCompatActivity() {
         filePathCallback?.onReceiveValue(null)
         filePathCallback = null
         destroyWebView()
+        lockHandler.removeCallbacksAndMessages(null)
         super.onDestroy()
     }
 
@@ -207,39 +303,85 @@ class MainActivity : AppCompatActivity() {
         }
 
         prefs.edit().putBoolean(KEY_LOCK, enable).apply()
+        
+        if (enable) {
+            isAuthenticated = true
+            lastInteractionTime = SystemClock.elapsedRealtime()
+            scheduleInactivityLock()
+        } else {
+            lockHandler.removeCallbacks(inactivityRunnable)
+            isAuthenticated = true
+        }
         val msg = if (enable) "Verrouillage activé au démarrage" else "Verrouillage désactivé"
         Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
     }
 
     private fun authenticateUser(savedInstanceState: Bundle?) {
+    
+        if (isAuthenticating || isAuthenticated) return
+    
+        isAuthenticating = true
+    
         val executor = ContextCompat.getMainExecutor(this)
+    
         val biometricPrompt = BiometricPrompt(
             this,
             executor,
             object : BiometricPrompt.AuthenticationCallback() {
-                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+    
+                override fun onAuthenticationSucceeded(
+                    result: BiometricPrompt.AuthenticationResult
+                ) {
                     super.onAuthenticationSucceeded(result)
+    
+                    isAuthenticating = false
+                    isAuthenticated = true
+    
+                    lastInteractionTime = SystemClock.elapsedRealtime()
+    
+                    webView.visibility = View.VISIBLE
                     refresh.visibility = View.VISIBLE
                     btnSettings.visibility = View.VISIBLE
-                    startNormalFlow(savedInstanceState)
+    
+                    // Ne recharge pas Mailcow si la page existe déjà.
+                    if (!pageInitialized) {
+                        startNormalFlow(
+                            savedInstanceState ?: pendingSavedState
+                        )
+                        pageInitialized = true
+                    }
+    
+                    scheduleInactivityLock()
                 }
-
-                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+    
+                override fun onAuthenticationError(
+                    errorCode: Int,
+                    errString: CharSequence
+                ) {
                     super.onAuthenticationError(errorCode, errString)
+    
+                    isAuthenticating = false
+    
                     finish()
+                }
+    
+                override fun onAuthenticationFailed() {
+                    super.onAuthenticationFailed()
+                    // L'utilisateur peut réessayer son empreinte.
                 }
             }
         )
-
+    
         val promptInfo = BiometricPrompt.PromptInfo.Builder()
             .setTitle("Mailcow Logs Viewer")
             .setSubtitle("Confirmez votre identité pour accéder aux logs")
-            .setAllowedAuthenticators(BIOMETRIC_STRONG or DEVICE_CREDENTIAL)
+            .setAllowedAuthenticators(
+                BIOMETRIC_STRONG or DEVICE_CREDENTIAL
+            )
             .build()
-
+    
         biometricPrompt.authenticate(promptInfo)
     }
-
     private fun showAboutDialog() {
         settingsDialog?.dismiss()
         settingsDialog = AlertDialog.Builder(this)
