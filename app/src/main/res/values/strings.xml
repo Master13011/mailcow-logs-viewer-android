@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">mailcow Logs</string>
+    <string name="shortcut_change_server">Change server</string>
+    <string name="server_title">Server address</string>
+    <string name="server_message">Enter the HTTPS address of your mailcow Logs Viewer instance.</string>
+    <string name="server_hint">https://logs.example.com</string>
+    <string name="server_invalid">Enter a valid HTTPS address.</string>
+    <string name="save">Save</string>
+    <string name="cancel">Cancel</string>
+    <string name="login_title">Authentication required</string>
+    <string name="username">Username</string>
+    <string name="password">Password</string>
+    <string name="sign_in">Sign in</string>
+    <string name="load_error_title">Unable to load the page</string>
+    <string name="ssl_error">The server certificate is not trusted. The connection was blocked.</string>
+    <string name="retry">Retry</string>
+    <string name="change_server">Change server</string>
+    <string name="download_started">Download started</string>
+</resources>
