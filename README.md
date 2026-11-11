@@ -6,6 +6,12 @@ L'application agit comme un client mobile : elle se connecte au serveur Mailcow 
 
 Elle apporte notamment des fonctionnalités natives supplémentaires pour améliorer le confort d'utilisation et sécuriser l'accès au serveur.
 
+## Prérequis
+
+⚠️ **Le backend [mailcow-logs-viewer](https://github.com/ShlomiPorush/mailcow-logs-viewer) est indispensable au fonctionnement de cette application**.
+
+Cette application Android ne fonctionne pas de manière autonome et ne fournit aucun backend. Vous devez disposer d'une instance de mailcow-logs-viewer déjà installée, configurée et accessible en HTTPS.
+
 ## Fonctionnalités
 
 🌐 Connexion à un serveur existant : configuration personnalisée de l'adresse HTTPS du backend **mailcow-logs-viewer**.
@@ -23,6 +29,7 @@ Elle apporte notamment des fonctionnalités natives supplémentaires pour améli
 ⚙️ Configuration intégrée : possibilité de changer de serveur et de gérer les paramètres de sécurité.
 
 ## Premier lancement
+
 Saisissez l'adresse **HTTPS** de votre instance (ex. `https://logs.exemple.com`).
 
 Pour la changer : Paramètres de l'application → *Changer de serveur*.
