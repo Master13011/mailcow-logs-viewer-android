@@ -13,8 +13,8 @@ android {
         applicationId = "app.mailcowlogs.viewer"
         minSdk = 26
         targetSdk = 36
-        versionCode = 10001
-        versionName = "1.0.1"
+        versionCode = 20000
+        versionName = "2.0.0"
     }
 
     buildFeatures {
