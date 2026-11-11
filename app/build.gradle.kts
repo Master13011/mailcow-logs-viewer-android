@@ -17,6 +17,10 @@ android {
         versionName = "1.0.1"
     }
 
+    buildFeatures {
+        buildConfig = true
+    }
+
     if (keystorePath != null) {
         signingConfigs {
             create("release") {
