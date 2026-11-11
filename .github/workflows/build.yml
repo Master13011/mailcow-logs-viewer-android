@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -47,8 +47,46 @@ jobs:
             gradle :app:assembleDebug
           fi
 
-      - uses: actions/upload-artifact@v7
+      - name: Vérifier la signature, renommer l'APK et générer le SHA-256
+        run: |
+          APK_FILE=$(find app/build/outputs/apk -name "*.apk" | head -n 1)
+          echo "Vérification de : $APK_FILE"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK_FILE"
+
+          # Déterminer le nom de version (le tag Git ou "dev" par défaut)
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+          else
+            VERSION="dev-${GITHUB_SHA::7}"
+          fi
+
+          # Déterminer le type (release ou debug)
+          if [[ "$APK_FILE" == *"release"* ]]; then
+            TYPE="release"
+          else
+            TYPE="debug"
+          fi
+
+          # Créer le dossier de sortie propre
+          mkdir -p dist
+          FINAL_NAME="mailcow-logs-viewer-${VERSION}-${TYPE}.apk"
+          cp "$APK_FILE" "dist/$FINAL_NAME"
+
+          # Générer le fichier de contrôle SHA-256
+          cd dist
+          sha256sum "$FINAL_NAME" > "${FINAL_NAME}.sha256"
+          ls -lh
+
+      - name: Uploader les artefacts
+        uses: actions/upload-artifact@v7
         with:
           name: mailcow-logs-viewer-apk
-          path: app/build/outputs/apk/**/*.apk
+          path: dist/*
           if-no-files-found: error
+
+      - name: Publier l'APK et le SHA-256 dans une GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
