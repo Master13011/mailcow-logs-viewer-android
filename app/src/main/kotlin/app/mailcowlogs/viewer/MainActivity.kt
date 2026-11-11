@@ -174,23 +174,23 @@ class MainActivity : AppCompatActivity() {
         webView.onResume()
     
         if (!prefs.getBoolean(KEY_LOCK, false)) return
-        if (backgroundTime > 0L &&
-            SystemClock.elapsedRealtime() - backgroundTime >= inactivityTimeout
-        ) {
-            backgroundTime = 0L
-            lockApplication()
-            return
+    
+        val backgroundDuration = if (backgroundTime > 0L) {
+            SystemClock.elapsedRealtime() - backgroundTime
+        } else {
+            0L
         }
-        
+    
         backgroundTime = 0L
+    
         if (!isAuthenticated) {
             authenticateUser(pendingSavedState)
             return
         }
     
-        val elapsed = SystemClock.elapsedRealtime() - lastInteractionTime
-    
-        if (elapsed >= inactivityTimeout) {
+        if (backgroundDuration >= inactivityTimeout ||
+            SystemClock.elapsedRealtime() - lastInteractionTime >= inactivityTimeout
+        ) {
             lockApplication()
         } else {
             scheduleInactivityLock()
