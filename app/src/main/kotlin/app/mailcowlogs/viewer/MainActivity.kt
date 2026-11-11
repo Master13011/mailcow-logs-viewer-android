@@ -250,7 +250,7 @@ class MainActivity : AppCompatActivity() {
                 return try {
                     fileChooser.launch(params.createIntent())
                     true
-                } catch (_: ActivityNotFoundException) {
+                } catch (e: ActivityNotFoundException) {
                     filePathCallback = null
                     callback.onReceiveValue(null)
                     false
@@ -276,7 +276,7 @@ class MainActivity : AppCompatActivity() {
                     .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
                 getSystemService(DownloadManager::class.java).enqueue(request)
                 Toast.makeText(this, R.string.download_started, Toast.LENGTH_SHORT).show()
-            } catch (_: RuntimeException) {
+            } catch (e: RuntimeException) {
                 openExternal(uri)
             }
         }
@@ -297,7 +297,7 @@ class MainActivity : AppCompatActivity() {
     private fun openExternal(uri: Uri) {
         try {
             startActivity(Intent(Intent.ACTION_VIEW, uri))
-        } catch (_: ActivityNotFoundException) {
+        } catch (e: ActivityNotFoundException) {
             // aucune application pour ouvrir ce lien
         }
     }
