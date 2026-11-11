@@ -39,6 +39,12 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+import android.widget.ImageButton
+import androidx.biometric.BiometricManager
+import androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_STRONG
+import androidx.biometric.BiometricManager.Authenticators.DEVICE_CREDENTIAL
+import androidx.biometric.BiometricPrompt
+import androidx.core.content.ContextCompat
 
 class MainActivity : AppCompatActivity() {
 
@@ -139,6 +145,95 @@ class MainActivity : AppCompatActivity() {
         filePathCallback = null
         destroyWebView()
         super.onDestroy()
+    }
+
+    // ------------------------------------------------------------------ Paramètres & Sécurité
+
+    private fun showSettingsDialog() {
+        val isLockEnabled = prefs.getBoolean(KEY_LOCK, false)
+        val lockText = if (isLockEnabled) {
+            "🔒 Désactiver le verrouillage (Empreinte / PIN)"
+        } else {
+            "🔓 Activer le verrouillage (Empreinte / PIN)"
+        }
+
+        val items = arrayOf(
+            lockText,
+            "🌐 Changer de serveur",
+            "ℹ️ À propos"
+        )
+
+        settingsDialog?.dismiss()
+        settingsDialog = AlertDialog.Builder(this)
+            .setTitle("Paramètres")
+            .setItems(items) { _, which ->
+                when (which) {
+                    0 -> toggleBiometricLock(!isLockEnabled)
+                    1 -> promptForServer(cancelable = serverUri != null)
+                    2 -> showAboutDialog()
+                }
+            }
+            .setNegativeButton("Fermer", null)
+            .show()
+    }
+
+    private fun toggleBiometricLock(enable: Boolean) {
+        val biometricManager = BiometricManager.from(this)
+        val authenticators = BIOMETRIC_STRONG or DEVICE_CREDENTIAL
+
+        if (enable && biometricManager.canAuthenticate(authenticators) != BiometricManager.BIOMETRIC_SUCCESS) {
+            Toast.makeText(
+                this,
+                "Aucune empreinte ni code PIN configuré sur cet appareil.",
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
+
+        prefs.edit().putBoolean(KEY_LOCK, enable).apply()
+        val msg = if (enable) "Verrouillage activé au démarrage" else "Verrouillage désactivé"
+        Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+    }
+
+    private fun authenticateUser(savedInstanceState: Bundle?) {
+        val executor = ContextCompat.getMainExecutor(this)
+        val biometricPrompt = BiometricPrompt(
+            this,
+            executor,
+            object : BiometricPrompt.AuthenticationCallback() {
+                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                    super.onAuthenticationSucceeded(result)
+                    refresh.visibility = View.VISIBLE
+                    btnSettings.visibility = View.VISIBLE
+                    startNormalFlow(savedInstanceState)
+                }
+
+                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                    super.onAuthenticationError(errorCode, errString)
+                    finish()
+                }
+            }
+        )
+
+        val promptInfo = BiometricPrompt.PromptInfo.Builder()
+            .setTitle("Mailcow Logs Viewer")
+            .setSubtitle("Confirmez votre identité pour accéder aux logs")
+            .setAllowedAuthenticators(BIOMETRIC_STRONG or DEVICE_CREDENTIAL)
+            .build()
+
+        biometricPrompt.authenticate(promptInfo)
+    }
+
+    private fun showAboutDialog() {
+        settingsDialog?.dismiss()
+        settingsDialog = AlertDialog.Builder(this)
+            .setTitle("À propos")
+            .setMessage(
+                "Mailcow Logs Viewer\n\n" +
+                    "Version : ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
+            )
+            .setPositiveButton("OK", null)
+            .show()
     }
 
     // ------------------------------------------------------------------ WebView
