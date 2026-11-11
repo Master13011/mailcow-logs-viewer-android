@@ -28,6 +28,7 @@ import android.webkit.WebStorage
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.EditText
+import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.Toast
@@ -36,21 +37,21 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowInsetsCompat
-import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
-import android.widget.ImageButton
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_STRONG
 import androidx.biometric.BiometricManager.Authenticators.DEVICE_CREDENTIAL
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var webView: WebView
     private lateinit var refresh: SwipeRefreshLayout
     private lateinit var progress: ProgressBar
+    private lateinit var btnSettings: ImageButton
     private lateinit var prefs: SharedPreferences
 
     private var serverUri: Uri? = null
@@ -58,6 +59,7 @@ class MainActivity : AppCompatActivity() {
     private var errorDialog: AlertDialog? = null
     private var serverDialog: AlertDialog? = null
     private var authDialog: AlertDialog? = null
+    private var settingsDialog: AlertDialog? = null
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
 
     private val fileChooser = registerForActivityResult(
@@ -80,6 +82,9 @@ class MainActivity : AppCompatActivity() {
         webView = findViewById(R.id.webview)
         refresh = findViewById(R.id.refresh)
         progress = findViewById(R.id.progress)
+        btnSettings = findViewById(R.id.btnSettings)
+
+        btnSettings.setOnClickListener { showSettingsDialog() }
 
         ViewCompat.setOnApplyWindowInsetsListener(findViewById<View>(R.id.root)) { v, insets ->
             val bars = insets.getInsets(
@@ -108,6 +113,16 @@ class MainActivity : AppCompatActivity() {
             }
         })
 
+        if (prefs.getBoolean(KEY_LOCK, false)) {
+            refresh.visibility = View.INVISIBLE
+            btnSettings.visibility = View.INVISIBLE
+            authenticateUser(savedInstanceState)
+        } else {
+            startNormalFlow(savedInstanceState)
+        }
+    }
+
+    private fun startNormalFlow(savedInstanceState: Bundle?) {
         if (intent?.action == ACTION_CHANGE_SERVER || serverUri == null) {
             promptForServer(cancelable = serverUri != null)
         } else if (savedInstanceState == null || webView.restoreState(savedInstanceState) == null) {
@@ -141,6 +156,7 @@ class MainActivity : AppCompatActivity() {
         errorDialog?.dismiss()
         serverDialog?.dismiss()
         authDialog?.dismiss()
+        settingsDialog?.dismiss()
         filePathCallback?.onReceiveValue(null)
         filePathCallback = null
         destroyWebView()
@@ -525,6 +541,7 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val PREFS = "settings"
         private const val KEY_SERVER = "server_url"
+        private const val KEY_LOCK = "lock_enabled"
         const val ACTION_CHANGE_SERVER = "app.mailcowlogs.viewer.CHANGE_SERVER"
     }
 }
