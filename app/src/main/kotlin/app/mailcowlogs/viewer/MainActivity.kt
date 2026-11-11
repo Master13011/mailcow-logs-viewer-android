@@ -66,7 +66,7 @@ class MainActivity : AppCompatActivity() {
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
     private val lockHandler = Handler(Looper.getMainLooper())
     
-    private val inactivityTimeout = 60_000L // 1 minute
+    private val inactivityTimeout = 120_000L // 2 minutes
     private var lastInteractionTime = 0L
     private var backgroundTime = 0L
     private var isAuthenticated = false
@@ -173,7 +173,12 @@ class MainActivity : AppCompatActivity() {
     
         webView.onResume()
     
-        if (!prefs.getBoolean(KEY_LOCK, false)) return
+        if (!prefs.getBoolean(KEY_LOCK, false)) {
+            webView.visibility = View.VISIBLE
+            refresh.visibility = View.VISIBLE
+            btnSettings.visibility = View.VISIBLE
+            return
+        }
     
         val backgroundDuration = if (backgroundTime > 0L) {
             SystemClock.elapsedRealtime() - backgroundTime
@@ -183,18 +188,23 @@ class MainActivity : AppCompatActivity() {
     
         backgroundTime = 0L
     
-        if (!isAuthenticated) {
+        if (!isAuthenticated || backgroundDuration >= inactivityTimeout ||
+            SystemClock.elapsedRealtime() - lastInteractionTime >= inactivityTimeout
+        ) {
+            lockHandler.removeCallbacks(inactivityRunnable)
+    
+            if (isAuthenticated) {
+                isAuthenticated = false
+                webView.visibility = View.INVISIBLE
+                refresh.visibility = View.INVISIBLE
+                btnSettings.visibility = View.INVISIBLE
+            }
+    
             authenticateUser(pendingSavedState)
             return
         }
     
-        if (backgroundDuration >= inactivityTimeout ||
-            SystemClock.elapsedRealtime() - lastInteractionTime >= inactivityTimeout
-        ) {
-            lockApplication()
-        } else {
-            scheduleInactivityLock()
-        }
+        scheduleInactivityLock()
     }
     
     override fun onPause() {
