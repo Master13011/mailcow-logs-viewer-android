@@ -13,8 +13,8 @@ android {
         applicationId = "app.mailcowlogs.viewer"
         minSdk = 26
         targetSdk = 36
-        versionCode = 100
-        versionName = "0.1.0"
+        versionCode = 10000
+        versionName = "1.0.0"
     }
 
     if (keystorePath != null) {
