@@ -53,4 +53,5 @@ android {
 dependencies {
     implementation("androidx.appcompat:appcompat:1.8.0")
     implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.2.0")
+    implementation("androidx.biometric:biometric:1.1.0")
 }
