@@ -17,6 +17,66 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+
+      - name: Calculer la version sémantique (feat / fix / patch)
+        id: version
+        run: |
+          python3 -c '
+          import re, subprocess, os
+
+          # 1. Récupérer le message du dernier commit
+          msg = subprocess.check_output(["git", "log", "-1", "--pretty=%s"]).decode().strip()
+          msg_lower = msg.lower()
+          print(f"Message du commit : {msg}")
+
+          # 2. Cibler le fichier build.gradle.kts exact
+          gradle_file = "mailcow-logs-viewer-android/app/build.gradle.kts"
+          if not os.path.exists(gradle_file):
+              gradle_file = "app/build.gradle.kts"
+          
+          with open(gradle_file, "r") as f:
+              content = f.read()
+
+          # 3. Extraire le versionName actuel (ex: 2.9.0)
+          match = re.search(r"versionName\s*=\s*\"(\d+)\.(\d+)\.(\d+)\"", content)
+          if not match:
+              raise ValueError("Impossible de trouver versionName au format X.Y.Z dans " + gradle_file)
+
+          major, minor, patch = map(int, match.groups())
+          old_version = f"{major}.{minor}.{patch}"
+
+          # 4. Appliquer les règles (+1.0.0 feat, +0.1.0 fix, +0.0.1 patch)
+          if re.match(r"^feat(\(.*\))?:", msg_lower):
+              major += 1
+              minor = 0
+              patch = 0
+          elif re.match(r"^fix(\(.*\))?:", msg_lower):
+              minor += 1
+              patch = 0
+          elif re.match(r"^patch(\(.*\))?:", msg_lower):
+              patch += 1
+
+          new_version = f"{major}.{minor}.{patch}"
+          new_code = major * 10000 + minor * 100 + patch
+          changed = "true" if new_version != old_version else "false"
+          
+          print(f"Version : {old_version} -> {new_version} (versionCode : {new_code})")
+
+          # 5. Mettre à jour build.gradle.kts si la version a évolué
+          if changed == "true":
+              content = re.sub(r"(versionName\s*=\s*\")[^\"]+(\")", rf"\g<1>{new_version}\g<2>", content)
+              content = re.sub(r"(versionCode\s*=\s*)\d+", rf"\g<1>{new_code}", content)
+              with open(gradle_file, "w") as f:
+                  f.write(content)
+
+          # 6. Exporter les variables pour le reste du workflow
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              out.write(f"new_version={new_version}\n")
+              out.write(f"changed={changed}\n")
+              out.write(f"gradle_file={gradle_file}\n")
+          '
 
       - uses: actions/setup-java@v6
         with:
@@ -39,6 +99,11 @@ jobs:
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
+          # Se placer dans le sous-dossier si le projet Android est dedans
+          if [ -d "mailcow-logs-viewer-android" ]; then
+            cd mailcow-logs-viewer-android
+          fi
+
           if [ -n "$KEYSTORE_B64" ]; then
             echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
             export KEYSTORE_FILE="$RUNNER_TEMP/release.jks"
@@ -48,31 +113,23 @@ jobs:
           fi
 
       - name: Vérifier la signature, renommer l'APK et générer le SHA-256
+        env:
+          APP_VERSION: ${{ steps.version.outputs.new_version }}
         run: |
-          APK_FILE=$(find app/build/outputs/apk -name "*.apk" | head -n 1)
+          APK_FILE=$(find . -path "*/build/outputs/apk/*.apk" | head -n 1)
           echo "Vérification de : $APK_FILE"
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK_FILE"
 
-          # Déterminer le nom de version (le tag Git ou "dev" par défaut)
-          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
-            VERSION="${GITHUB_REF#refs/tags/}"
-          else
-            VERSION="dev-${GITHUB_SHA::7}"
-          fi
-
-          # Déterminer le type (release ou debug)
           if [[ "$APK_FILE" == *"release"* ]]; then
             TYPE="release"
           else
             TYPE="debug"
           fi
 
-          # Créer le dossier de sortie propre
           mkdir -p dist
-          FINAL_NAME="mailcow-logs-viewer-${VERSION}-${TYPE}.apk"
+          FINAL_NAME="mailcow-logs-viewer-v${APP_VERSION}-${TYPE}.apk"
           cp "$APK_FILE" "dist/$FINAL_NAME"
 
-          # Générer le fichier de contrôle SHA-256
           cd dist
           sha256sum "$FINAL_NAME" > "${FINAL_NAME}.sha256"
           ls -lh
@@ -84,9 +141,23 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
+      - name: Sauvegarder le nouveau numéro de version dans Git
+        if: steps.version.outputs.changed == 'true' && github.ref == 'refs/heads/main'
+        env:
+          NEW_VERSION: ${{ steps.version.outputs.new_version }}
+          GRADLE_FILE: ${{ steps.version.outputs.gradle_file }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@://github.com"
+          git add "$GRADLE_FILE"
+          git commit -m "chore(release): bump version to v${NEW_VERSION} [skip ci]"
+          git push
+
       - name: Publier l'APK et le SHA-256 dans une GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
+        if: (steps.version.outputs.changed == 'true' && github.ref == 'refs/heads/main') || startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ steps.version.outputs.new_version }}
+          name: v${{ steps.version.outputs.new_version }}
           files: dist/*
           generate_release_notes: true
