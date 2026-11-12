@@ -1,10 +1,51 @@
 version: 2
+
 updates:
+  # Dépendances Gradle : AGP (plugin), AndroidX, et Gradle lui-même via le wrapper.
   - package-ecosystem: gradle
     directory: "/"
     schedule:
       interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Paris
+    open-pull-requests-limit: 5
+    # Attend 7 jours après la publication d'une version avant de la proposer
+    # (limite le risque de version compromise). Les correctifs de sécurité passent quand même.
+    cooldown:
+      default-days: 7
+    # "patch:" => le workflow build.yml incrémente la version et publie un nouvel APK après fusion.
+    commit-message:
+      prefix: "patch"
+      include: scope
+    groups:
+      androidx:
+        patterns:
+          - "androidx.*"
+      # AGP et Gradle doivent évoluer ensemble (AGP impose une version minimale de Gradle).
+      build-tooling:
+        patterns:
+          - "*"
+    labels:
+      - dependencies
+
+  # Versions des actions utilisées dans .github/workflows/*.yml
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
       interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Paris
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "patch"
+      include: scope
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+    labels:
+      - dependencies
