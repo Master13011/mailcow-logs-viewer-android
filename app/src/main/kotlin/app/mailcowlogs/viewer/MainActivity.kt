@@ -9,9 +9,11 @@ import android.content.SharedPreferences
 import android.graphics.Bitmap
 import android.net.Uri
 import android.net.http.SslError
+import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.text.InputType
+import android.text.util.Linkify
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.CookieManager
@@ -31,6 +33,8 @@ import android.widget.EditText
 import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.ProgressBar
+import android.widget.ScrollView
+import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.enableEdgeToEdge
@@ -443,12 +447,55 @@ class MainActivity : AppCompatActivity() {
     }
     private fun showAboutDialog() {
         settingsDialog?.dismiss()
+
+        val webViewVersion: String = (
+            try {
+                WebView.getCurrentWebViewPackage()?.versionName
+            } catch (e: RuntimeException) {
+                null
+            }
+            ) ?: "inconnue"
+        val build = BuildConfig.GIT_COMMIT.takeIf { it.isNotBlank() }?.let { " · build $it" } ?: ""
+        val lock = if (isLockEnabled()) "activé" else "désactivé"
+
+        val message = buildString {
+            append("Client Android non officiel pour mailcow Logs Viewer.\n\n")
+
+            append("APPLICATION\n")
+            append("Version : ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})$build\n")
+            append("Licence : GPL-3.0\n\n")
+
+            append("BACKEND REQUIS\n")
+            append("mailcow Logs Viewer\n")
+            append("Licence : MIT\n\n")
+
+            append("SERVEUR CONFIGURÉ\n")
+            append("${serverUri ?: "non configuré"}\n\n")
+
+            append("APPAREIL\n")
+            append("Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})\n")
+            append("WebView : $webViewVersion\n")
+            append("Verrouillage biométrique : $lock\n\n")
+
+            append("DÉPÔTS\n")
+            if (BuildConfig.APP_REPO_URL.isNotBlank()) {
+                append("Application :\n${BuildConfig.APP_REPO_URL}\n")
+            }
+            append("Backend :\n$BACKEND_REPO_URL")
+        }
+
+        val text = TextView(this).apply {
+            this.text = message
+            textSize = 14f
+            setPadding(24.dp(), 16.dp(), 24.dp(), 0)
+            // Les URL deviennent cliquables et s'ouvrent dans le navigateur du téléphone.
+            Linkify.addLinks(this, Linkify.WEB_URLS)
+        }
+        val scroll = ScrollView(this).apply { addView(text) }
+
         settingsDialog = AlertDialog.Builder(this)
             .setTitle("À propos")
-            .setMessage(
-                "Mailcow Logs Viewer\n\n" +
-                    "Version : ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
-            )
+            .setView(scroll)
             .setPositiveButton("OK", null)
             .show()
     }
@@ -744,5 +791,6 @@ class MainActivity : AppCompatActivity() {
         private const val KEY_SERVER = "server_url"
         private const val KEY_LOCK = "lock_enabled"
         const val ACTION_CHANGE_SERVER = "app.mailcowlogs.viewer.CHANGE_SERVER"
+        private const val BACKEND_REPO_URL = "https://github.com/ShlomiPorush/mailcow-logs-viewer"
     }
 }
