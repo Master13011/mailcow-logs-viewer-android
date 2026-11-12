@@ -17,4 +17,6 @@
     <string name="retry">Réessayer</string>
     <string name="change_server">Changer de serveur</string>
     <string name="download_started">Téléchargement lancé</string>
+    <string name="locked_title">Application verrouillée</string>
+    <string name="unlock">Déverrouiller</string>
 </resources>
