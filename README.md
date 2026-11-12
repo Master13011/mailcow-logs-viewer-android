@@ -18,7 +18,7 @@ Cette application Android ne fonctionne pas de manière autonome et ne fournit a
 
 🔐 Protection biométrique : verrouillage de l'application par empreinte digitale ou code PIN de l'appareil.
 
-⏱️ Verrouillage automatique : protection après une minute d'inactivité ou de mise en arrière-plan.
+⏱️ Verrouillage automatique : protection après deux minutes d'inactivité ou de mise en arrière-plan.
 
 🔄 Actualisation rapide : rechargement de l'interface par glissement vers le bas.
 

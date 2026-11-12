@@ -148,7 +148,7 @@ jobs:
           GRADLE_FILE: ${{ steps.version.outputs.gradle_file }}
         run: |
           git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@://github.com"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add "$GRADLE_FILE"
           git commit -m "chore(release): bump version to v${NEW_VERSION} [skip ci]"
           git push

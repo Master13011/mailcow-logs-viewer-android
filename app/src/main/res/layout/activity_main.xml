@@ -33,4 +33,40 @@
         android:background="?attr/selectableItemBackgroundBorderless"
         android:contentDescription="Paramètres"
         android:src="@android:drawable/ic_menu_preferences" />
+
+    <!-- Écran de verrouillage : toujours visible quand l'app est verrouillée (jamais d'écran noir). -->
+    <LinearLayout
+        android:id="@+id/lockOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@color/window_bg"
+        android:clickable="true"
+        android:focusable="true"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:padding="32dp"
+        android:visibility="gone">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:importantForAccessibility="no"
+            android:text="🔒"
+            android:textSize="56sp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="@string/locked_title"
+            android:textColor="?android:attr/textColorPrimary"
+            android:textSize="18sp" />
+
+        <Button
+            android:id="@+id/btnUnlock"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:text="@string/unlock" />
+    </LinearLayout>
 </FrameLayout>

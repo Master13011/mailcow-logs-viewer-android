@@ -55,7 +55,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var refresh: SwipeRefreshLayout
     private lateinit var progress: ProgressBar
     private lateinit var btnSettings: ImageButton
+    private lateinit var lockOverlay: View
     private lateinit var prefs: SharedPreferences
+    private lateinit var biometricPrompt: BiometricPrompt
+    private lateinit var promptInfo: BiometricPrompt.PromptInfo
 
     private var serverUri: Uri? = null
     private var webViewDestroyed = false
@@ -65,17 +68,21 @@ class MainActivity : AppCompatActivity() {
     private var settingsDialog: AlertDialog? = null
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
     private val lockHandler = Handler(Looper.getMainLooper())
-    
+
     private val inactivityTimeout = 120_000L // 2 minutes
+    private val authenticators = BIOMETRIC_STRONG or DEVICE_CREDENTIAL
     private var lastInteractionTime = 0L
     private var backgroundTime = 0L
     private var isAuthenticated = false
     private var isAuthenticating = false
+    private var isForeground = false
     private var pageInitialized = false
     private var pendingSavedState: Bundle? = null
-    
+
     private val inactivityRunnable = Runnable {
-        if (prefs.getBoolean(KEY_LOCK, false) && isAuthenticated) {
+        // Ne verrouille que si l'écran est visible : en arrière-plan, le contrôle
+        // est fait par onResume() à partir des horodatages.
+        if (isLockEnabled() && isAuthenticated && isForeground) {
             lockApplication()
         }
     }
@@ -89,6 +96,8 @@ class MainActivity : AppCompatActivity() {
         filePathCallback = null
     }
 
+    private fun isLockEnabled(): Boolean = prefs.getBoolean(KEY_LOCK, false)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
@@ -101,8 +110,13 @@ class MainActivity : AppCompatActivity() {
         refresh = findViewById(R.id.refresh)
         progress = findViewById(R.id.progress)
         btnSettings = findViewById(R.id.btnSettings)
+        lockOverlay = findViewById(R.id.lockOverlay)
 
         btnSettings.setOnClickListener { showSettingsDialog() }
+        findViewById<View>(R.id.btnUnlock).setOnClickListener {
+            isAuthenticating = false
+            startAuthentication()
+        }
 
         ViewCompat.setOnApplyWindowInsetsListener(findViewById<View>(R.id.root)) { v, insets ->
             val bars = insets.getInsets(
@@ -115,6 +129,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         configureWebView()
+        setupBiometricPrompt()
 
         refresh.setOnRefreshListener { webView.reload() }
         // Ne déclenche le "pull to refresh" que lorsque la page est tout en haut.
@@ -122,7 +137,8 @@ class MainActivity : AppCompatActivity() {
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                if (webView.canGoBack()) {
+                // Verrouillé : "retour" quitte l'app, il ne doit jamais naviguer dans la page cachée.
+                if (!(isLockEnabled() && !isAuthenticated) && webView.canGoBack()) {
                     webView.goBack()
                 } else {
                     isEnabled = false
@@ -132,12 +148,10 @@ class MainActivity : AppCompatActivity() {
         })
 
         pendingSavedState = savedInstanceState
-        
-        if (prefs.getBoolean(KEY_LOCK, false)) {
+
+        if (isLockEnabled()) {
             isAuthenticated = false
-            webView.visibility = View.INVISIBLE
-            refresh.visibility = View.INVISIBLE
-            btnSettings.visibility = View.INVISIBLE
+            showLockScreen()
         } else {
             isAuthenticated = true
             lastInteractionTime = SystemClock.elapsedRealtime()
@@ -156,7 +170,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        if (intent.action == ACTION_CHANGE_SERVER) {
+        // Pas de boîte de dialogue par-dessus l'écran de verrouillage.
+        if (intent.action == ACTION_CHANGE_SERVER && (!isLockEnabled() || isAuthenticated)) {
             promptForServer(cancelable = serverUri != null)
         }
     }
@@ -168,95 +183,107 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-    
+        isForeground = true
+
         if (webViewDestroyed) return
-    
+
         webView.onResume()
-    
-        if (!prefs.getBoolean(KEY_LOCK, false)) {
-            webView.visibility = View.VISIBLE
-            refresh.visibility = View.VISIBLE
-            btnSettings.visibility = View.VISIBLE
+
+        if (!isLockEnabled()) {
+            hideLockScreen()
             return
         }
-    
-        val backgroundDuration = if (backgroundTime > 0L) {
-            SystemClock.elapsedRealtime() - backgroundTime
-        } else {
-            0L
-        }
-    
+
+        val now = SystemClock.elapsedRealtime()
+        val backgroundDuration = if (backgroundTime > 0L) now - backgroundTime else 0L
         backgroundTime = 0L
-    
-        if (!isAuthenticated || backgroundDuration >= inactivityTimeout ||
-            SystemClock.elapsedRealtime() - lastInteractionTime >= inactivityTimeout
+
+        if (isAuthenticated &&
+            (backgroundDuration >= inactivityTimeout || now - lastInteractionTime >= inactivityTimeout)
         ) {
             lockHandler.removeCallbacks(inactivityRunnable)
-    
-            if (isAuthenticated) {
-                isAuthenticated = false
-                webView.visibility = View.INVISIBLE
-                refresh.visibility = View.INVISIBLE
-                btnSettings.visibility = View.INVISIBLE
-            }
-    
-            authenticateUser(pendingSavedState)
+            isAuthenticated = false
+            dismissSensitiveDialogs()
+        }
+
+        if (!isAuthenticated) {
+            showLockScreen()
+            // Laisse la fenêtre prendre le focus avant d'afficher l'invite biométrique.
+            window.decorView.post { startAuthentication() }
             return
         }
-    
+
         scheduleInactivityLock()
     }
-    
+
     override fun onPause() {
+        isForeground = false
         backgroundTime = SystemClock.elapsedRealtime()
-    
+        lockHandler.removeCallbacks(inactivityRunnable)
+
+        // L'invite biométrique est annulée par le système quand l'app passe en arrière-plan,
+        // parfois sans aucun rappel : on remet l'état à zéro pour pouvoir la relancer au retour.
+        isAuthenticating = false
+
         if (!webViewDestroyed) {
             webView.onPause()
         }
-    
+
         super.onPause()
     }
 
     override fun onUserInteraction() {
         super.onUserInteraction()
-    
-        if (isAuthenticated &&
-            prefs.getBoolean(KEY_LOCK, false)
-        ) {
+
+        if (isAuthenticated && isLockEnabled()) {
             lastInteractionTime = SystemClock.elapsedRealtime()
             scheduleInactivityLock()
         }
     }
-    
+
     private fun lockApplication() {
-        if (!prefs.getBoolean(KEY_LOCK, false)) return
-        if (!isAuthenticated) return
+        if (!isLockEnabled() || !isAuthenticated) return
 
         backgroundTime = 0L
         lockHandler.removeCallbacks(inactivityRunnable)
-    
         isAuthenticated = false
-    
+
+        dismissSensitiveDialogs()
+        showLockScreen()
+        startAuthentication()
+    }
+
+    private fun scheduleInactivityLock() {
+        lockHandler.removeCallbacks(inactivityRunnable)
+
+        if (!isAuthenticated || !isLockEnabled() || !isForeground) return
+
+        val elapsed = SystemClock.elapsedRealtime() - lastInteractionTime
+        val remaining = (inactivityTimeout - elapsed).coerceAtLeast(0L)
+
+        lockHandler.postDelayed(inactivityRunnable, remaining)
+    }
+
+    private fun showLockScreen() {
+        lockOverlay.visibility = View.VISIBLE
         webView.visibility = View.INVISIBLE
         refresh.visibility = View.INVISIBLE
         btnSettings.visibility = View.INVISIBLE
-    
-        authenticateUser(null)
     }
-    
-    private fun scheduleInactivityLock() {
-        lockHandler.removeCallbacks(inactivityRunnable)
-    
-        if (!isAuthenticated ||
-            !prefs.getBoolean(KEY_LOCK, false)
-        ) return
-    
-        val elapsed = SystemClock.elapsedRealtime() - lastInteractionTime
-        val remaining = (inactivityTimeout - elapsed).coerceAtLeast(0L)
-    
-        lockHandler.postDelayed(inactivityRunnable, remaining)
-    }    
-    
+
+    private fun hideLockScreen() {
+        lockOverlay.visibility = View.GONE
+        webView.visibility = View.VISIBLE
+        refresh.visibility = View.VISIBLE
+        btnSettings.visibility = View.VISIBLE
+    }
+
+    private fun dismissSensitiveDialogs() {
+        settingsDialog?.dismiss()
+        serverDialog?.dismiss()
+        errorDialog?.dismiss()
+    }
+
     override fun onDestroy() {
         errorDialog?.dismiss()
         serverDialog?.dismiss()
@@ -268,6 +295,7 @@ class MainActivity : AppCompatActivity() {
         lockHandler.removeCallbacksAndMessages(null)
         super.onDestroy()
     }
+
 
     // ------------------------------------------------------------------ Paramètres & Sécurité
 
@@ -301,7 +329,6 @@ class MainActivity : AppCompatActivity() {
 
     private fun toggleBiometricLock(enable: Boolean) {
         val biometricManager = BiometricManager.from(this)
-        val authenticators = BIOMETRIC_STRONG or DEVICE_CREDENTIAL
 
         if (enable && biometricManager.canAuthenticate(authenticators) != BiometricManager.BIOMETRIC_SUCCESS) {
             Toast.makeText(
@@ -313,84 +340,106 @@ class MainActivity : AppCompatActivity() {
         }
 
         prefs.edit().putBoolean(KEY_LOCK, enable).apply()
-        
+
+        isAuthenticated = true
         if (enable) {
-            isAuthenticated = true
             lastInteractionTime = SystemClock.elapsedRealtime()
             scheduleInactivityLock()
         } else {
             lockHandler.removeCallbacks(inactivityRunnable)
-            isAuthenticated = true
         }
         val msg = if (enable) "Verrouillage activé au démarrage" else "Verrouillage désactivé"
         Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
     }
 
-    private fun authenticateUser(savedInstanceState: Bundle?) {
-    
-        if (isAuthenticating || isAuthenticated) return
-    
-        isAuthenticating = true
-    
-        val executor = ContextCompat.getMainExecutor(this)
-    
-        val biometricPrompt = BiometricPrompt(
+    /** Créé une seule fois (onCreate) : l'instance s'abonne au cycle de vie de l'activité. */
+    private fun setupBiometricPrompt() {
+        biometricPrompt = BiometricPrompt(
             this,
-            executor,
+            ContextCompat.getMainExecutor(this),
             object : BiometricPrompt.AuthenticationCallback() {
-    
-                override fun onAuthenticationSucceeded(
-                    result: BiometricPrompt.AuthenticationResult
-                ) {
+
+                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
                     super.onAuthenticationSucceeded(result)
-    
-                    isAuthenticating = false
-                    isAuthenticated = true
-    
-                    lastInteractionTime = SystemClock.elapsedRealtime()
-    
-                    webView.visibility = View.VISIBLE
-                    refresh.visibility = View.VISIBLE
-                    btnSettings.visibility = View.VISIBLE
-    
-                    // Ne recharge pas Mailcow si la page existe déjà.
-                    if (!pageInitialized) {
-                        startNormalFlow(
-                            savedInstanceState ?: pendingSavedState
-                        )
-                        pageInitialized = true
-                    }
-    
-                    scheduleInactivityLock()
+                    onUnlocked()
                 }
-    
-                override fun onAuthenticationError(
-                    errorCode: Int,
-                    errString: CharSequence
-                ) {
+
+                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
                     super.onAuthenticationError(errorCode, errString)
-    
                     isAuthenticating = false
-    
-                    finish()
+                    // Annulation par l'utilisateur ou le système : l'écran de verrouillage reste
+                    // affiché avec son bouton « Déverrouiller », et l'invite sera relancée
+                    // automatiquement au prochain retour dans l'application.
+                    if (errorCode != BiometricPrompt.ERROR_CANCELED &&
+                        errorCode != BiometricPrompt.ERROR_USER_CANCELED &&
+                        errorCode != BiometricPrompt.ERROR_NEGATIVE_BUTTON
+                    ) {
+                        Toast.makeText(this@MainActivity, errString, Toast.LENGTH_LONG).show()
+                    }
                 }
-    
+
                 override fun onAuthenticationFailed() {
                     super.onAuthenticationFailed()
                     // L'utilisateur peut réessayer son empreinte.
                 }
             }
         )
-    
-        val promptInfo = BiometricPrompt.PromptInfo.Builder()
+
+        promptInfo = BiometricPrompt.PromptInfo.Builder()
             .setTitle("Mailcow Logs Viewer")
             .setSubtitle("Confirmez votre identité pour accéder aux logs")
-            .setAllowedAuthenticators(
-                BIOMETRIC_STRONG or DEVICE_CREDENTIAL
-            )
+            .setAllowedAuthenticators(authenticators)
             .build()
-    
-        biometricPrompt.authenticate(promptInfo)
+    }
+
+    private fun startAuthentication() {
+        if (!isForeground || isFinishing || isDestroyed || webViewDestroyed) return
+        if (isAuthenticating || isAuthenticated || !isLockEnabled()) return
+
+        when (BiometricManager.from(this).canAuthenticate(authenticators)) {
+            BiometricManager.BIOMETRIC_SUCCESS -> Unit
+            BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED,
+            BiometricManager.BIOMETRIC_ERROR_NO_HARDWARE -> {
+                // Plus aucun verrouillage d'écran sur l'appareil : le déverrouillage est impossible.
+                prefs.edit().putBoolean(KEY_LOCK, false).apply()
+                Toast.makeText(
+                    this,
+                    "Aucun verrouillage d'écran configuré : verrouillage de l'application désactivé.",
+                    Toast.LENGTH_LONG
+                ).show()
+                onUnlocked()
+                return
+            }
+            else -> {
+                Toast.makeText(this, "Authentification momentanément indisponible.", Toast.LENGTH_LONG).show()
+                return
+            }
+        }
+
+        isAuthenticating = true
+        try {
+            biometricPrompt.authenticate(promptInfo)
+        } catch (e: IllegalStateException) {
+            isAuthenticating = false
+        }
+    }
+
+    private fun onUnlocked() {
+        isAuthenticating = false
+        isAuthenticated = true
+        lastInteractionTime = SystemClock.elapsedRealtime()
+
+        if (webViewDestroyed) return
+
+        hideLockScreen()
+
+        // Ne recharge pas Mailcow si la page existe déjà.
+        if (!pageInitialized) {
+            startNormalFlow(pendingSavedState)
+            pageInitialized = true
+        }
+
+        scheduleInactivityLock()
     }
     private fun showAboutDialog() {
         settingsDialog?.dismiss()
