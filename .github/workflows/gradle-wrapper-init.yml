@@ -31,11 +31,11 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v6
         with:
-          gradle-version: ${{ inputs.gradle_version }}
+          gradle-version: ${{ inputs.gradle_version || '9.9.1' }}
 
       - name: Générer le wrapper
         env:
-          GRADLE_VERSION: ${{ inputs.gradle_version }}
+          GRADLE_VERSION: ${{ inputs.gradle_version || '9.9.1' }}
         run: gradle wrapper --gradle-version "$GRADLE_VERSION" --distribution-type bin
 
       - name: Committer le wrapper
