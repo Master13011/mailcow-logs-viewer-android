@@ -5,6 +5,15 @@ plugins {
 // Signature release : fournie par variables d'environnement (CI) – jamais dans le dépôt.
 val keystorePath: String? = System.getenv("KEYSTORE_FILE")
 
+val repoUrl: String = System.getenv("GITHUB_REPOSITORY")
+    ?.takeIf { it.matches(Regex("[A-Za-z0-9._-]+/[A-Za-z0-9._-]+")) }
+    ?.let { "https://github.com/$it" }
+    ?: ""
+val gitCommit: String = System.getenv("GITHUB_SHA")
+    ?.takeIf { it.matches(Regex("[0-9a-f]{7,40}")) }
+    ?.take(7)
+    ?: ""
+
 android {
     namespace = "app.mailcowlogs.viewer"
     compileSdk = 37
@@ -15,6 +24,9 @@ android {
         targetSdk = 36
         versionCode = 20500
         versionName = "2.5.0"
+
+        buildConfigField("String", "APP_REPO_URL", "\"$repoUrl\"")
+        buildConfigField("String", "GIT_COMMIT", "\"$gitCommit\"")
     }
 
     buildFeatures {
