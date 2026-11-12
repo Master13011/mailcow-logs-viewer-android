@@ -17,4 +17,6 @@
     <string name="retry">Retry</string>
     <string name="change_server">Change server</string>
     <string name="download_started">Download started</string>
+    <string name="locked_title">Application locked</string>
+    <string name="unlock">Unlock</string>
 </resources>
