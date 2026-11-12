@@ -4,6 +4,9 @@ name: Initialiser le Gradle Wrapper
 # Génère gradlew + gradle/wrapper/* afin que Dependabot puisse mettre Gradle à jour.
 # Ensuite, Dependabot propose lui-même les nouvelles versions de Gradle.
 on:
+  push:
+    branches:
+      - refactor
   workflow_dispatch:
     inputs:
       gradle_version:
