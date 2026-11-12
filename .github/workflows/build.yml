@@ -88,9 +88,13 @@ jobs:
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37.0" "build-tools;36.0.0"
 
+      # Vérifie que gradle-wrapper.jar est bien le fichier officiel de Gradle.
+      - name: Valider le Gradle Wrapper
+        uses: gradle/actions/wrapper-validation@v6
+
+      # La version de Gradle vient de gradle/wrapper/gradle-wrapper.properties
+      # (mise à jour automatiquement par Dependabot).
       - uses: gradle/actions/setup-gradle@v6
-        with:
-          gradle-version: "9.9.1"
 
       - name: Build (release signé si secrets présents, sinon debug)
         env:
@@ -99,17 +103,14 @@ jobs:
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          # Se placer dans le sous-dossier si le projet Android est dedans
-          if [ -d "mailcow-logs-viewer-android" ]; then
-            cd mailcow-logs-viewer-android
-          fi
+          chmod +x ./gradlew
 
           if [ -n "$KEYSTORE_B64" ]; then
             echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
             export KEYSTORE_FILE="$RUNNER_TEMP/release.jks"
-            gradle :app:lintRelease :app:assembleRelease
+            ./gradlew :app:lintRelease :app:assembleRelease
           else
-            gradle :app:assembleDebug
+            ./gradlew :app:assembleDebug
           fi
 
       - name: Vérifier la signature, renommer l'APK et générer le SHA-256
@@ -118,7 +119,8 @@ jobs:
         run: |
           APK_FILE=$(find . -path "*/build/outputs/apk/*.apk" | head -n 1)
           echo "Vérification de : $APK_FILE"
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK_FILE"
+          BUILD_TOOLS_DIR=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)
+          "$BUILD_TOOLS_DIR/apksigner" verify --verbose --print-certs "$APK_FILE"
 
           if [[ "$APK_FILE" == *"release"* ]]; then
             TYPE="release"
